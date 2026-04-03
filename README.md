@@ -18,10 +18,13 @@ If you work with multiple git worktrees and run Claude Code sessions in each, `c
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/) (recommended) or pipx.
 
 ```bash
-# with uv
+# install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# install cx
 uv tool install git+https://github.com/javi-carrera/cx.git
 
-# with pipx
+# or with pipx
 pipx install git+https://github.com/javi-carrera/cx.git
 ```
 
