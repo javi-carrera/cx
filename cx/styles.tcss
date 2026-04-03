@@ -1,0 +1,176 @@
+/* cx TUI — Claude-branded dark theme */
+
+Screen {
+    layout: vertical;
+}
+
+#title-bar {
+    height: 3;
+    padding: 0 1;
+    border: round #DA7756;
+}
+
+#panels {
+    height: auto;
+}
+
+WorktreePanel {
+    width: 1fr;
+    border: round #555555;
+    border-title-color: #555555;
+    border-title-style: bold;
+    padding: 0 1;
+}
+
+SessionPanel {
+    width: 1fr;
+    border: round #555555;
+    border-title-color: #555555;
+    border-title-style: bold;
+    padding: 0 1;
+}
+
+WorktreePanel:focus-within {
+    border: round #DA7756;
+    border-title-color: #DA7756;
+}
+
+SessionPanel:focus-within {
+    border: round #DA7756;
+    border-title-color: #DA7756;
+}
+
+StatusBar {
+    height: 3;
+    width: 100%;
+    border: round #DA7756;
+    border-title-color: #DA7756;
+    border-title-style: bold;
+    padding: 0 1;
+}
+
+/* List items */
+WorktreePanel ListView {
+    height: auto;
+}
+
+SessionPanel ListView {
+    height: auto;
+}
+
+ListView > ListItem.-highlight {
+    background: rgba(255, 255, 255, 0.1);
+    text-style: none;
+}
+
+ListView:focus > ListItem.-highlight {
+    background: rgba(255, 255, 255, 0.15);
+    text-style: none;
+}
+
+ListView > ListItem:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+ListItem {
+    height: 1;
+    padding: 0 1;
+}
+
+ListItem Horizontal {
+    height: 1;
+    width: 100%;
+}
+
+.session-name {
+    width: 1fr;
+}
+
+.session-indicator {
+    width: 1;
+    content-align: right middle;
+}
+
+/* Inline confirm */
+.confirm-label {
+    width: 1fr;
+}
+
+.confirm-choices {
+    width: auto;
+    content-align: right middle;
+}
+
+/* Inline inputs */
+.inline-create {
+    height: 1;
+    width: 100%;
+}
+
+.inline-create Input {
+    height: 1;
+    border: none;
+    width: 1fr;
+    padding: 0 1;
+}
+
+.inline-input {
+    height: 1;
+    border: none;
+    padding: 0 1;
+}
+
+/* Empty state */
+.empty-message {
+    color: $text-muted;
+    text-style: italic;
+    padding: 1 2;
+}
+
+/* Modal dialogs (confirm) */
+ModalScreen {
+    align: center middle;
+}
+
+.modal-container {
+    width: 60;
+    height: auto;
+    border: round #DA7756;
+    background: $surface;
+    padding: 0 1;
+}
+
+.modal-container Static.modal-title {
+    text-style: bold;
+    color: #DA7756;
+    width: 100%;
+    content-align: center middle;
+}
+
+.modal-buttons {
+    height: 3;
+    align: center middle;
+}
+
+.modal-buttons Button {
+    margin: 0 1;
+    border: round #DA7756;
+    min-width: 14;
+}
+
+Footer {
+    background: transparent;
+    dock: none;
+}
+
+ToastRack {
+    dock: none;
+    align: right top;
+    margin-top: 1;
+}
+
+Toast {
+    height: 1;
+    padding: 0 1;
+    margin: 0;
+}
