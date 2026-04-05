@@ -31,6 +31,7 @@ class Setting:
 DEFAULT_SETTINGS = [
     Setting("Permission mode", "permission_mode", ["bypassPermissions", "auto", "acceptEdits", "plan", "default", "dontAsk"]),
     Setting("Model", "model", ["opus", "sonnet", "haiku"]),
+    Setting("Context", "context", ["1M", "200k"]),
     Setting("Effort", "effort", ["high", "low", "medium", "max"]),
     Setting("Verbose", "verbose", ["OFF", "ON"]),
     Setting("Debug", "debug", ["OFF", "ON"]),
@@ -123,7 +124,11 @@ class SettingsPanel(Widget, can_focus=False):
             args.append("--dangerously-skip-permissions")
         else:
             args.extend(["--permission-mode", pm])
-        args.extend(["--model", self.get_setting("model")])
+        model = self.get_setting("model")
+        context = self.get_setting("context")
+        if context == "1M":
+            model = f"{model}[1m]"
+        args.extend(["--model", model])
         args.extend(["--effort", self.get_setting("effort")])
         if self.get_setting("verbose") == "ON":
             args.append("--verbose")
