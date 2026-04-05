@@ -73,6 +73,32 @@ cx
 
 Clears the terminal and launches Claude Code with `--dangerously-skip-permissions` in the current directory.
 
+## Status Line
+
+A standalone script that adds a status line to Claude Code with Unicode progress bars.
+
+**What it shows:**
+
+- Current directory and session name
+- Context window usage with progress bar and token counts
+- 5-hour rate limit usage with countdown to reset
+
+**Install:**
+
+1. Copy `status-line/status_line.py` anywhere on your machine
+2. Add to your `.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "python3 /path/to/status_line.py"
+  }
+}
+```
+
+No dependencies — just Python 3 standard library.
+
 ## How it works
 
 - Worktrees are discovered from git (`git worktree list --porcelain`) and stored as `scope--feature-id` directories
