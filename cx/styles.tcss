@@ -49,6 +49,33 @@ StatusBar {
     padding: 0 1;
 }
 
+SettingsPanel {
+    height: auto;
+    width: 100%;
+    border: round #555555;
+    border-title-color: #555555;
+    border-title-style: bold;
+    padding: 0 1;
+}
+
+SettingsPanel:focus-within {
+    border: round #DA7756;
+    border-title-color: #DA7756;
+}
+
+SettingsPanel ListView {
+    height: auto;
+}
+
+.setting-name {
+    width: 1fr;
+}
+
+.setting-value {
+    width: auto;
+    content-align: right middle;
+}
+
 /* List items */
 WorktreePanel ListView {
     height: auto;
@@ -170,6 +197,7 @@ ToastRack {
 }
 
 Toast {
+    width: auto;
     height: 1;
     padding: 0 1;
     margin: 0;

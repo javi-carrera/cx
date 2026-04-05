@@ -1,5 +1,6 @@
 """Session panel — right side of the TUI."""
 
+import re
 from pathlib import Path
 
 from textual.app import ComposeResult
@@ -24,7 +25,7 @@ class SessionPanel(Widget, can_focus=False):
     ]
 
     class NewSessionRequested(Message):
-        """Request to create and launch a new session."""
+        """Request to create a new session."""
 
         def __init__(self, wt_name: str, wt_path: Path, name: str) -> None:
             super().__init__()
@@ -35,9 +36,10 @@ class SessionPanel(Widget, can_focus=False):
     class DeleteSessionConfirmed(Message):
         """Confirmed deletion of a session."""
 
-        def __init__(self, wt_name: str, session_name: str) -> None:
+        def __init__(self, wt_name: str, session_id: str, session_name: str) -> None:
             super().__init__()
             self.wt_name = wt_name
+            self.session_id = session_id
             self.session_name = session_name
 
     class LaunchSessionRequested(Message):
@@ -54,7 +56,6 @@ class SessionPanel(Widget, can_focus=False):
         self._current_wt_name: str | None = None
         self._current_wt_path: Path | None = None
         self._confirm_item: ListItem | None = None
-        self._confirm_original_widgets: list | None = None
         self._confirm_yes: bool = False
 
     def compose(self) -> ComposeResult:
@@ -222,6 +223,7 @@ class SessionPanel(Widget, can_focus=False):
             self.post_message(
                 self.DeleteSessionConfirmed(
                     wt_name=self._current_wt_name or "",
+                    session_id=getattr(item, "_session_id", ""),
                     session_name=item.name or "",
                 )
             )
@@ -263,6 +265,9 @@ class SessionPanel(Widget, can_focus=False):
             name = event.input.value.strip()
             if not name:
                 self.notify("Session name cannot be empty", severity="warning")
+                return
+            if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9 _-]*$", name):
+                self.notify("Invalid name (alphanumeric, spaces, hyphens, underscores)", severity="error")
                 return
             self._hide_inline_input()
             self.post_message(

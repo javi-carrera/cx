@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Generator
 
 from cx.config import get_state_file
-from cx.models import CxState, SessionEntry, WorktreeEntry
+from cx.models import CxState
 
 
 def _migrate_v1_to_v2(raw: dict[str, Any]) -> dict[str, Any]:

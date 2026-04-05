@@ -19,11 +19,11 @@ class DiscoveredWorktree:
 
 
 def validate_scope(scope: str) -> str:
-    """Validate and return scope. Must be alphanumeric only."""
+    """Validate and return scope. Alphanumeric + hyphens, no leading/trailing hyphen."""
     if not scope:
         raise ValueError("Scope cannot be empty")
-    if not re.match(r"^[a-zA-Z0-9]+$", scope):
-        raise ValueError(f"Invalid scope (alphanumeric only): {scope}")
+    if not re.match(r"^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$", scope):
+        raise ValueError(f"Invalid scope (alphanumeric + hyphens): {scope}")
     return scope
 
 
@@ -94,10 +94,11 @@ def discover_worktrees() -> list[DiscoveredWorktree]:
     return worktrees
 
 
-def create_worktree(scope: str, feature_id: str) -> tuple[Path, str]:
+def create_worktree(scope: str, feature_id: str) -> tuple[Path, str, str]:
     """Create a git worktree with scope--feature-id naming.
 
-    Returns (worktree_path, branch_name).
+    Returns (worktree_path, branch_name, source) where source is
+    "local", "remote", or "new".
     """
     scope = validate_scope(scope)
     feature_id = validate_feature_id(feature_id)
@@ -107,31 +108,110 @@ def create_worktree(scope: str, feature_id: str) -> tuple[Path, str]:
     wt_path = get_worktree_dir() / dir_name
 
     wt_path.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "worktree", "add", str(wt_path), "-b", branch_name],
-        check=True,
+
+    # Check if branch already exists locally or on remote
+    local = subprocess.run(
+        ["git", "rev-parse", "--verify", branch_name],
+        capture_output=True, text=True,
+    )
+    remote = subprocess.run(
+        ["git", "rev-parse", "--verify", f"origin/{branch_name}"],
+        capture_output=True, text=True,
+    )
+
+    if local.returncode == 0:
+        # Branch exists locally — check out into worktree
+        subprocess.run(
+            ["git", "worktree", "add", str(wt_path), branch_name],
+            check=True, capture_output=True, text=True,
+        )
+        source = "local"
+    elif remote.returncode == 0:
+        # Branch exists on remote — create local tracking branch
+        subprocess.run(
+            ["git", "worktree", "add", str(wt_path), "-b", branch_name, f"origin/{branch_name}"],
+            check=True, capture_output=True, text=True,
+        )
+        source = "remote"
+    else:
+        # New branch
+        subprocess.run(
+            ["git", "worktree", "add", str(wt_path), "-b", branch_name],
+            check=True, capture_output=True, text=True,
+        )
+        source = "new"
+
+    return wt_path, branch_name, source
+
+
+def _is_branch_merged(branch: str) -> bool:
+    """Check whether a branch is merged into its upstream or HEAD."""
+    # Try upstream first (what git branch -d checks)
+    upstream = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"],
         capture_output=True,
         text=True,
     )
-    return wt_path, branch_name
+    target = upstream.stdout.strip() if upstream.returncode == 0 else "HEAD"
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", branch, target],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
 
 
-def remove_worktree(dir_name: str, branch: str | None = None) -> None:
-    """Remove a git worktree and delete its branch."""
-    wt_path = get_worktree_dir() / dir_name
+class BranchNotMergedError(RuntimeError):
+    """Raised when a branch deletion is blocked because it is not fully merged."""
+
+
+class DirtyWorktreeError(RuntimeError):
+    """Raised when a worktree has uncommitted changes."""
+
+
+def _is_worktree_dirty(wt_path: str) -> bool:
+    """Check whether a worktree has uncommitted changes (staged or unstaged)."""
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True, text=True, cwd=wt_path,
+    )
+    return bool(result.stdout.strip())
+
+
+def remove_worktree(
+    wt_path: str, branch: str | None = None, *, force: bool = False,
+) -> None:
+    """Remove a git worktree by its absolute path and delete its branch.
+
+    Pre-checks for uncommitted changes and branch merge status before
+    removing anything.  Pass *force=True* to skip all safety checks.
+    """
+    if not force:
+        if _is_worktree_dirty(wt_path):
+            raise DirtyWorktreeError(
+                f"Worktree '{wt_path}' has uncommitted changes."
+            )
+        if branch:
+            exists = subprocess.run(
+                ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+                capture_output=True,
+                text=True,
+            )
+            if exists.returncode == 0 and not _is_branch_merged(branch):
+                raise BranchNotMergedError(
+                    f"Branch '{branch}' is not fully merged."
+                )
+
     subprocess.run(
-        ["git", "worktree", "remove", str(wt_path), "--force"],
+        ["git", "worktree", "remove", wt_path, "--force"],
         check=True,
         capture_output=True,
         text=True,
     )
     if branch:
-        try:
-            subprocess.run(
-                ["git", "branch", "-D", branch],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError:
-            pass  # Branch may already be gone
+        flag = "-D" if force else "-d"
+        subprocess.run(
+            ["git", "branch", flag, branch],
+            capture_output=True,
+            text=True,
+        )

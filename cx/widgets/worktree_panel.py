@@ -50,11 +50,14 @@ class WorktreePanel(Widget, can_focus=False):
     class DeleteWorktreeConfirmed(Message):
         """Confirmed deletion of a worktree."""
 
-        def __init__(self, name: str, path: Path, branch: str | None) -> None:
+        def __init__(
+            self, name: str, path: Path, branch: str | None, *, force: bool = False,
+        ) -> None:
             super().__init__()
             self.wt_name = name
             self.path = path
             self.branch = branch
+            self.force = force
 
     def compose(self) -> ComposeResult:
         yield ListView(id="worktree-list")
@@ -68,6 +71,7 @@ class WorktreePanel(Widget, can_focus=False):
         self._confirm_item: ListItem | None = None
         self._confirm_original: str = ""
         self._confirm_yes: bool = False
+        self._confirm_force: bool = False
         self.refresh_worktrees()
 
     def content_height(self) -> int:
@@ -205,17 +209,43 @@ class WorktreePanel(Widget, can_focus=False):
         self._confirm_item = None
         self._confirm_original = ""
         self._confirm_yes = False
+        self._confirm_force = False
+
+    def show_force_confirm(self, wt_name: str, reason: str = "Branch not merged.") -> None:
+        """Show a force-delete confirmation with a given reason."""
+        lv = self.query_one("#worktree-list", ListView)
+        for child in lv.children:
+            if child.name == wt_name:
+                self._confirm_force = True
+                self._confirm_item = child
+                label = child.query_one(Label)
+                self._confirm_original = str(label.render())
+                self._confirm_yes = False
+                label.remove()
+                child.mount(
+                    Horizontal(
+                        Label(
+                            f"[bold #ff6b7c]{reason}[/] Force delete?",
+                            classes="confirm-label",
+                        ),
+                        Label("", classes="confirm-choices"),
+                    )
+                )
+                self._render_confirm()
+                return
 
     def _accept_confirm(self) -> None:
         if not self._confirm_item:
             return
         item = self._confirm_item
+        force = self._confirm_force
         if self._confirm_yes:
             self.post_message(
                 self.DeleteWorktreeConfirmed(
                     name=item.name or "",
                     path=getattr(item, "_wt_path", Path()),
                     branch=getattr(item, "_wt_branch", None),
+                    force=force,
                 )
             )
         self._cancel_confirm()
@@ -250,6 +280,7 @@ class WorktreePanel(Widget, can_focus=False):
                 self.notify("Invalid feature ID", severity="error")
                 return
             self._hide_inline_inputs()
+            self.query_one("#worktree-list", ListView).focus()
             self.post_message(self.NewWorktreeRequested(scope=scope, feature_id=feature))
 
     def on_key(self, event) -> None:

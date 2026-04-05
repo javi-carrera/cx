@@ -9,8 +9,11 @@ from textual.containers import Horizontal
 from textual.widgets import Footer, Static
 
 from cx import claude, state, worktree as wt_mod
+from cx.worktree import BranchNotMergedError, DirtyWorktreeError
+from cx.config import get_current_branch
 from cx.models import SessionEntry, WorktreeEntry
 from cx.widgets.session_panel import SessionPanel
+from cx.widgets.settings_panel import SettingsPanel
 from cx.widgets.status_bar import StatusBar
 from cx.widgets.worktree_panel import WorktreeDeselected, WorktreeHighlighted, WorktreePanel
 
@@ -29,6 +32,7 @@ class CxxApp(App):
         Binding("shift+tab", "focus_previous", show=False),
         Binding("left", "focus_worktrees", "← Worktrees", show=False),
         Binding("right", "focus_sessions", "→ Sessions", show=False),
+        Binding("s", "toggle_settings", "Settings", show=True),
     ]
 
     def __init__(self) -> None:
@@ -42,12 +46,13 @@ class CxxApp(App):
         with Horizontal(id="panels"):
             yield WorktreePanel()
             yield SessionPanel()
+        yield SettingsPanel()
         yield StatusBar()
         yield Footer()
 
     def on_mount(self) -> None:
+        self.query_one(SettingsPanel).display = False
         self._update_panel_height()
-        # Focus the worktree list
         try:
             wt_list = self.query_one("#worktree-list")
             wt_list.focus()
@@ -59,7 +64,6 @@ class CxxApp(App):
         wt = self.query_one(WorktreePanel).content_height()
         session = self.query_one(SessionPanel).content_height()
         max_items = max(wt, session, 1)
-        # +2 for panel border (top + bottom)
         self.query_one("#panels").styles.height = max_items + 2
 
     def action_focus_worktrees(self) -> None:
@@ -67,6 +71,14 @@ class CxxApp(App):
 
     def action_focus_sessions(self) -> None:
         self.query_one("#session-list").focus()
+
+    def action_toggle_settings(self) -> None:
+        panel = self.query_one(SettingsPanel)
+        panel.display = not panel.display
+        if panel.display:
+            self.query_one("#settings-list").focus()
+        else:
+            self.query_one("#worktree-list").focus()
 
     # --- Worktree events ---
 
@@ -90,37 +102,65 @@ class CxxApp(App):
     ) -> None:
         """Create a new worktree from inline input."""
         try:
-            wt_path, branch_name = wt_mod.create_worktree(event.scope, event.feature_id)
+            wt_path, branch_name, source = wt_mod.create_worktree(event.scope, event.feature_id)
         except Exception as e:
             self.notify(f"Failed to create worktree: {e}", severity="error")
+            wt_panel = self.query_one(WorktreePanel)
+            wt_panel.refresh_worktrees()
+            self.query_one("#worktree-list").focus()
             return
 
         dir_name = f"{event.scope}--{event.feature_id}"
         now = datetime.now(timezone.utc)
+        try:
+            base_branch = get_current_branch()
+        except Exception:
+            base_branch = "unknown"
 
         with state.modify_state() as s:
             s.worktrees[dir_name] = WorktreeEntry(
                 path=wt_path,
                 branch=branch_name,
-                base_branch="dev",
+                base_branch=base_branch,
                 created_at=now,
             )
 
         self.query_one(WorktreePanel).refresh_worktrees()
         self._update_panel_height()
-        self.notify(f"Created worktree: {dir_name}")
+        if source == "remote":
+            self.notify(f"Created worktree from remote branch: {dir_name}")
+        elif source == "local":
+            self.notify(f"Created worktree from local branch: {dir_name}")
+        else:
+            self.notify(f"Created worktree: {dir_name}")
 
     def on_worktree_panel_delete_worktree_confirmed(
         self, event: WorktreePanel.DeleteWorktreeConfirmed
     ) -> None:
         """Delete a worktree after inline confirmation."""
         try:
-            wt_mod.remove_worktree(event.wt_name, event.branch)
+            wt_mod.remove_worktree(
+                str(event.path), event.branch, force=event.force,
+            )
+        except DirtyWorktreeError:
+            self.query_one(WorktreePanel).show_force_confirm(
+                event.wt_name, reason="Uncommitted changes.",
+            )
+            return
+        except BranchNotMergedError:
+            self.query_one(WorktreePanel).show_force_confirm(event.wt_name)
+            return
         except Exception as e:
             self.notify(f"Failed to remove worktree: {e}", severity="error")
             return
 
         with state.modify_state() as s:
+            keys_to_remove = [
+                name for name, entry in s.worktrees.items()
+                if Path(entry.path) == event.path
+            ]
+            for key in keys_to_remove:
+                s.worktrees.pop(key, None)
             s.worktrees.pop(event.wt_name, None)
 
         self.query_one(WorktreePanel).refresh_worktrees()
@@ -138,10 +178,16 @@ class CxxApp(App):
 
         with state.modify_state() as s:
             if event.wt_name not in s.worktrees:
+                branch = event.wt_name
+                base_branch = "unknown"
+                for dw in wt_mod.discover_worktrees():
+                    if dw.path == event.wt_path:
+                        branch = dw.branch or event.wt_name
+                        break
                 s.worktrees[event.wt_name] = WorktreeEntry(
                     path=event.wt_path,
-                    branch=event.wt_name,
-                    base_branch="dev",
+                    branch=branch,
+                    base_branch=base_branch,
                     created_at=now,
                 )
             s.worktrees[event.wt_name].sessions.append(
@@ -162,20 +208,30 @@ class CxxApp(App):
         self, event: SessionPanel.LaunchSessionRequested
     ) -> None:
         """Launch/resume a Claude Code session, then return to TUI."""
+        resume = False
         with state.modify_state() as s:
             for wt in s.worktrees.values():
                 for session in wt.sessions:
                     if session.session_id == event.session_id:
+                        resume = session.launched
+                        session.launched = True
                         session.last_accessed = datetime.now(timezone.utc)
                         break
 
-        args = claude.build_resume_args(event.session_id, name=event.session_name)
+        settings_args = self.query_one(SettingsPanel).get_claude_args()
+        args = claude.build_session_args(
+            event.session_id, name=event.session_name, extra_args=settings_args,
+            resume=resume,
+        )
+        exit_code = 0
         with self.suspend():
             import os
             os.system("clear")
-            claude.run_claude(args, event.wt_path)
+            exit_code = claude.run_claude(args, event.wt_path)
 
-        # Refresh session panel to update active indicators
+        if exit_code != 0:
+            self.notify(f"Claude exited with code {exit_code}", severity="warning")
+
         session_panel = self.query_one(SessionPanel)
         if session_panel._current_wt_name and session_panel._current_wt_path:
             session_panel.update_sessions(
@@ -190,7 +246,7 @@ class CxxApp(App):
         with state.modify_state() as s:
             wt = s.worktrees.get(event.wt_name)
             if wt:
-                wt.sessions = [ss for ss in wt.sessions if ss.name != event.session_name]
+                wt.sessions = [ss for ss in wt.sessions if ss.session_id != event.session_id]
 
         session_panel = self.query_one(SessionPanel)
         if session_panel._current_wt_name and session_panel._current_wt_path:

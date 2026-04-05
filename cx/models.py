@@ -13,6 +13,7 @@ class SessionEntry(BaseModel):
     name: str
     created_at: datetime
     last_accessed: datetime
+    launched: bool = False
 
 
 class WorktreeEntry(BaseModel):

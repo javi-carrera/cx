@@ -4,29 +4,27 @@ import subprocess
 import uuid
 from pathlib import Path
 
-from cx.config import CLAUDE_FLAGS
-
 
 def generate_session_id() -> str:
     """Generate a new UUID for a Claude Code session."""
     return str(uuid.uuid4())
 
 
-def build_launch_args(session_id: str, name: str | None = None) -> list[str]:
-    """Build argv list for launching a new Claude Code session."""
-    args = ["claude"] + CLAUDE_FLAGS + ["--session-id", session_id]
-    if name:
-        args.extend(["--name", name])
-    return args
+def build_session_args(
+    session_id: str,
+    name: str | None = None,
+    extra_args: list[str] | None = None,
+    resume: bool = False,
+) -> list[str]:
+    """Build argv list for a Claude Code session.
 
-
-def build_resume_args(session_id: str, name: str | None = None) -> list[str]:
-    """Build argv list for resuming an existing Claude Code session.
-
-    Uses --session-id instead of --resume so that stale session IDs
-    start a new conversation rather than failing.
+    extra_args are inserted before the session flag (e.g. settings flags).
+    Uses --resume for previously launched sessions, --session-id for new ones.
     """
-    args = ["claude"] + CLAUDE_FLAGS + ["--session-id", session_id]
+    if resume:
+        args = ["claude"] + (extra_args or []) + ["--resume", session_id]
+    else:
+        args = ["claude"] + (extra_args or []) + ["--session-id", session_id]
     if name:
         args.extend(["--name", name])
     return args
