@@ -1,11 +1,17 @@
-"""Settings panel — toggleable pane for Claude Code launch options."""
+"""Settings panel for Claude Code launch options."""
 
 from dataclasses import dataclass, field
 
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widget import Widget
-from textual.widgets import Label, ListItem, ListView
+from textual.widgets import Label, ListItem, ListView, Static
+
+from cx import claude
+from cx.colors import ACCENT, GREEN, RED
+
+_CHANGE_GROUP = Binding.Group("Change", compact=True)
 
 
 @dataclass
@@ -29,29 +35,36 @@ class Setting:
 
 
 DEFAULT_SETTINGS = [
-    Setting("Permission mode", "permission_mode", ["bypassPermissions", "auto", "acceptEdits", "plan", "default", "dontAsk"]),
-    Setting("Model", "model", ["opus", "sonnet", "haiku"]),
-    Setting("Context", "context", ["1M", "200k"]),
-    Setting("Effort", "effort", ["high", "low", "medium", "max"]),
+    Setting("Permission mode", "permission_mode", ["plan", "dontAsk", "default", "acceptEdits", "auto", "bypassPermissions"], index=5),
+    Setting("Model", "model", ["haiku", "sonnet", "opus"], index=2),
+    Setting("Context", "context", ["200k", "1M"], index=1),
+    Setting("Effort", "effort", ["low", "medium", "high", "max"], index=2),
     Setting("Verbose", "verbose", ["OFF", "ON"]),
     Setting("Debug", "debug", ["OFF", "ON"]),
 ]
 
 
 def _format_value(setting: Setting) -> str:
-    """Format a setting value with color."""
+    """Return a colorized setting value."""
     val = setting.current
     if val == "ON":
-        return "[#98c379]ON[/]"
+        return f"[{GREEN}]ON[/]"
     if val == "OFF":
-        return "[#e06c75]OFF[/]"
-    return f"[#DA7756]{val}[/]"
+        return f"[{RED}]OFF[/]"
+    return f"[{ACCENT}]{val}[/]"
 
 
 class SettingsPanel(Widget, can_focus=False):
-    """Vertical list of toggleable settings for Claude Code launches."""
+    """Toggleable settings for Claude Code launches."""
 
-    BORDER_TITLE = "Settings"
+    BORDER_TITLE = "Claude Code Settings"
+
+    BINDINGS = [
+        Binding("q", "app.quit", "Quit", show=True),
+        Binding("s", "app.toggle_settings", "Settings", show=True),
+        Binding("left", "cycle_prev", " ", show=True, priority=True, group=_CHANGE_GROUP),
+        Binding("right", "cycle_next", " ", show=True, priority=True, group=_CHANGE_GROUP),
+    ]
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -61,13 +74,28 @@ class SettingsPanel(Widget, can_focus=False):
         ]
 
     def compose(self) -> ComposeResult:
+        yield Static(
+            "Claude Code not installed",
+            classes="empty-message",
+            id="settings-empty",
+        )
         yield ListView(id="settings-list")
 
     def on_mount(self) -> None:
-        self.border_title = "Settings"
+        if not claude.IS_INSTALLED:
+            # Inert: hide the list, show the "not installed" message, and
+            # make the ListView unfocusable so `s` toggle never lands here
+            # from anywhere (the session panel is also unfocusable, so this
+            # is belt-and-suspenders).
+            self.query_one("#settings-list", ListView).display = False
+            self.query_one("#settings-list", ListView).can_focus = False
+            return
+        self.query_one("#settings-empty", Static).display = False
         self._rebuild_items()
 
     def content_height(self) -> int:
+        if not claude.IS_INSTALLED:
+            return 1
         return len(self._settings)
 
     def _rebuild_items(self) -> None:
@@ -96,28 +124,29 @@ class SettingsPanel(Widget, can_focus=False):
             value_label = item.query_one(".setting-value", Label)
             value_label.update(_format_value(setting))
 
-    def on_key(self, event) -> None:
+    def action_cycle_prev(self) -> None:
         lv = self.query_one("#settings-list", ListView)
-        if not lv.has_focus or lv.index is None:
+        if lv.index is None:
             return
-        if event.key == "right":
-            self._settings[lv.index].next()
-            self._update_current_item()
-            event.stop()
-        elif event.key == "left":
-            self._settings[lv.index].prev()
-            self._update_current_item()
-            event.stop()
+        self._settings[lv.index].prev()
+        self._update_current_item()
+
+    def action_cycle_next(self) -> None:
+        lv = self.query_one("#settings-list", ListView)
+        if lv.index is None:
+            return
+        self._settings[lv.index].next()
+        self._update_current_item()
 
     def get_setting(self, key: str) -> str:
-        """Get the current value of a setting by key."""
+        """Return the current value of a setting by key."""
         for s in self._settings:
             if s.key == key:
                 return s.current
         return ""
 
     def get_claude_args(self) -> list[str]:
-        """Build CLI args from current settings."""
+        """Build CLI args from the current settings."""
         args: list[str] = []
         pm = self.get_setting("permission_mode")
         if pm == "bypassPermissions":

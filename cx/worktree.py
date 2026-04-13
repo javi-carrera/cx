@@ -10,7 +10,7 @@ from cx.config import get_repo_root, get_worktree_dir
 
 @dataclass
 class DiscoveredWorktree:
-    """A worktree discovered from git worktree list."""
+    """A worktree parsed from ``git worktree list --porcelain``."""
 
     path: Path
     commit: str
@@ -19,7 +19,7 @@ class DiscoveredWorktree:
 
 
 def validate_scope(scope: str) -> str:
-    """Validate and return scope. Alphanumeric + hyphens, no leading/trailing hyphen."""
+    """Validate and return a branch scope."""
     if not scope:
         raise ValueError("Scope cannot be empty")
     if not re.match(r"^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$", scope):
@@ -28,7 +28,7 @@ def validate_scope(scope: str) -> str:
 
 
 def validate_feature_id(feature_id: str) -> str:
-    """Validate and return feature ID. Alphanumeric + hyphens, no leading hyphen."""
+    """Validate and return a feature ID."""
     if not feature_id:
         raise ValueError("Feature ID cannot be empty")
     if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9-]*$", feature_id):
@@ -39,7 +39,7 @@ def validate_feature_id(feature_id: str) -> str:
 
 
 def discover_worktrees() -> list[DiscoveredWorktree]:
-    """Discover all git worktrees via git worktree list --porcelain."""
+    """Return all git worktrees from ``git worktree list --porcelain``."""
     result = subprocess.run(
         ["git", "worktree", "list", "--porcelain"],
         capture_output=True,
@@ -77,7 +77,6 @@ def discover_worktrees() -> list[DiscoveredWorktree]:
         elif line == "detached":
             pass  # branch stays None
 
-    # Handle last block (no trailing blank line)
     if current:
         path = Path(current["worktree"])
         branch_ref = current.get("branch")
@@ -109,7 +108,6 @@ def create_worktree(scope: str, feature_id: str) -> tuple[Path, str, str]:
 
     wt_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Check if branch already exists locally or on remote
     local = subprocess.run(
         ["git", "rev-parse", "--verify", branch_name],
         capture_output=True, text=True,
@@ -120,21 +118,18 @@ def create_worktree(scope: str, feature_id: str) -> tuple[Path, str, str]:
     )
 
     if local.returncode == 0:
-        # Branch exists locally — check out into worktree
         subprocess.run(
             ["git", "worktree", "add", str(wt_path), branch_name],
             check=True, capture_output=True, text=True,
         )
         source = "local"
     elif remote.returncode == 0:
-        # Branch exists on remote — create local tracking branch
         subprocess.run(
             ["git", "worktree", "add", str(wt_path), "-b", branch_name, f"origin/{branch_name}"],
             check=True, capture_output=True, text=True,
         )
         source = "remote"
     else:
-        # New branch
         subprocess.run(
             ["git", "worktree", "add", str(wt_path), "-b", branch_name],
             check=True, capture_output=True, text=True,
@@ -169,6 +164,15 @@ class DirtyWorktreeError(RuntimeError):
     """Raised when a worktree has uncommitted changes."""
 
 
+class BranchDeleteError(RuntimeError):
+    """Raised when the worktree was removed but the branch could not be deleted."""
+
+    def __init__(self, branch: str, stderr: str) -> None:
+        super().__init__(f"Branch '{branch}' was not deleted: {stderr.strip()}")
+        self.branch = branch
+        self.stderr = stderr
+
+
 def _is_worktree_dirty(wt_path: str) -> bool:
     """Check whether a worktree has uncommitted changes (staged or unstaged)."""
     result = subprocess.run(
@@ -178,18 +182,48 @@ def _is_worktree_dirty(wt_path: str) -> bool:
     return bool(result.stdout.strip())
 
 
+def _has_sequencer_state(wt_path: str) -> bool:
+    """Check whether a worktree has an in-progress Git operation."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--git-dir"],
+        capture_output=True, text=True, cwd=wt_path,
+    )
+    if result.returncode != 0:
+        return False
+
+    git_dir = Path(result.stdout.strip())
+    if not git_dir.is_absolute():
+        git_dir = Path(wt_path) / git_dir
+
+    sequencer_paths = (
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "rebase-merge",
+        "rebase-apply",
+        "BISECT_LOG",
+    )
+    return any((git_dir / path).exists() for path in sequencer_paths)
+
+
 def remove_worktree(
     wt_path: str, branch: str | None = None, *, force: bool = False,
-) -> None:
+) -> str | None:
     """Remove a git worktree by its absolute path and delete its branch.
 
     Pre-checks for uncommitted changes and branch merge status before
     removing anything.  Pass *force=True* to skip all safety checks.
+    Returns the deleted branch's short SHA when a forced branch delete
+    succeeds and the SHA could be captured; otherwise returns None.
     """
     if not force:
         if _is_worktree_dirty(wt_path):
             raise DirtyWorktreeError(
                 f"Worktree '{wt_path}' has uncommitted changes."
+            )
+        if _has_sequencer_state(wt_path):
+            raise DirtyWorktreeError(
+                "Worktree has an in-progress merge/rebase/cherry-pick."
             )
         if branch:
             exists = subprocess.run(
@@ -202,16 +236,36 @@ def remove_worktree(
                     f"Branch '{branch}' is not fully merged."
                 )
 
+    remove_cmd = ["git", "worktree", "remove", wt_path]
+    if force:
+        remove_cmd.append("--force")
+    # Dirty / sequencer / unmerged-branch cases are caught by the pre-checks
+    # above; any failure here is something else (path not a worktree, locked,
+    # permissions, concurrent race) and should surface git's own stderr.
     subprocess.run(
-        ["git", "worktree", "remove", wt_path, "--force"],
+        remove_cmd,
         check=True,
         capture_output=True,
         text=True,
     )
+
+    deleted_sha: str | None = None
     if branch:
         flag = "-D" if force else "-d"
-        subprocess.run(
+        if force:
+            # Capture before deletion so the UI can show a recovery command.
+            sha_result = subprocess.run(
+                ["git", "rev-parse", "--short", branch],
+                capture_output=True,
+                text=True,
+            )
+            if sha_result.returncode == 0:
+                deleted_sha = sha_result.stdout.strip() or None
+        result = subprocess.run(
             ["git", "branch", flag, branch],
             capture_output=True,
             text=True,
         )
+        if result.returncode != 0:
+            raise BranchDeleteError(branch, result.stderr)
+    return deleted_sha

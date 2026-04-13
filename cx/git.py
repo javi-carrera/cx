@@ -1,4 +1,4 @@
-"""Async git queries for TUI status display."""
+"""Async git status queries for the TUI."""
 
 import asyncio
 from dataclasses import dataclass
@@ -7,7 +7,7 @@ from pathlib import Path
 
 @dataclass
 class WorktreeStatus:
-    """Detailed git status for a worktree."""
+    """Git status counts and metadata for a worktree."""
 
     staged: int = 0
     unstaged: int = 0
@@ -55,7 +55,7 @@ async def get_file_status(path: Path) -> tuple[int, int, int]:
 
 
 async def get_ahead_behind(path: Path) -> tuple[int, int]:
-    """Get commits ahead/behind upstream. Returns (0, 0) if no upstream."""
+    """Return commits ahead/behind upstream, or (0, 0) when no upstream exists."""
     proc = await asyncio.create_subprocess_exec(
         "git", "-C", str(path),
         "rev-list", "--left-right", "--count", "HEAD...@{upstream}",
@@ -72,7 +72,7 @@ async def get_ahead_behind(path: Path) -> tuple[int, int]:
 
 
 async def get_last_commit(path: Path) -> str:
-    """Get the short last commit message."""
+    """Return the last commit subject, truncated for display."""
     proc = await asyncio.create_subprocess_exec(
         "git", "-C", str(path), "log", "-1", "--format=%s",
         stdout=asyncio.subprocess.PIPE,
@@ -88,7 +88,7 @@ async def get_last_commit(path: Path) -> str:
 
 
 async def get_tracking_branch(path: Path) -> str:
-    """Get the upstream tracking branch name. Empty if none."""
+    """Return the upstream tracking branch name, or an empty string when unset."""
     proc = await asyncio.create_subprocess_exec(
         "git", "-C", str(path),
         "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}",
@@ -102,7 +102,7 @@ async def get_tracking_branch(path: Path) -> str:
 
 
 async def get_worktree_status(path: Path) -> WorktreeStatus:
-    """Get combined status for a worktree."""
+    """Return combined status for a worktree."""
     (staged, unstaged, untracked), (ahead, behind), tracking, last_commit = (
         await asyncio.gather(
             get_file_status(path),

@@ -1,6 +1,5 @@
-"""Worktree panel — left side of the TUI."""
+"""Git worktree panel for the TUI."""
 
-import re
 from pathlib import Path
 
 from textual.app import ComposeResult
@@ -11,6 +10,7 @@ from textual.widget import Widget
 from textual.widgets import Input, Label, ListItem, ListView
 
 from cx import worktree
+from cx.colors import ACCENT, DANGER
 
 NEW_WORKTREE_SENTINEL = "__new__"
 
@@ -31,12 +31,19 @@ class WorktreeDeselected(Message):
 
 
 class WorktreePanel(Widget, can_focus=False):
-    """Left panel showing git worktrees."""
+    """Panel showing git worktrees."""
 
     BORDER_TITLE = "Worktrees"
 
     BINDINGS = [
+        Binding("q", "app.quit", "Quit", show=True),
         Binding("d", "delete_worktree", "Delete", show=True),
+        Binding("tab", "next_pane", "Sessions", show=True, priority=True),
+        Binding("escape", "cancel", "Cancel", show=True),
+        # Enter bindings: two bindings with different labels, gated by
+        # check_action so only one shows at a time — last in the footer.
+        Binding("enter", "enter_select", "Select", show=True),
+        Binding("enter", "enter_accept", "Accept", show=True),
     ]
 
     class NewWorktreeRequested(Message):
@@ -63,7 +70,7 @@ class WorktreePanel(Widget, can_focus=False):
         yield ListView(id="worktree-list")
         with Horizontal(id="wt-create-row", classes="inline-create"):
             yield Input(placeholder="scope", id="wt-scope")
-            yield Input(placeholder="feature-id", id="wt-feature")
+            yield Input(placeholder="feature", id="wt-feature")
 
     def on_mount(self) -> None:
         self.border_title = "Worktrees"
@@ -85,6 +92,41 @@ class WorktreePanel(Widget, can_focus=False):
     @property
     def _is_creating(self) -> bool:
         return self.query_one("#wt-create-row").display
+
+    @property
+    def is_modal(self) -> bool:
+        """True when the panel has a modal UI element (create input or confirm)."""
+        return self._is_creating or self._is_confirming
+
+    def check_action(self, action: str, parameters: tuple) -> bool | None:
+        """Gate footer visibility based on modal state and highlight."""
+        on_sentinel = self._highlight_is_sentinel()
+        if action == "delete_worktree":
+            # Hidden during modal and on the "+ New worktree" sentinel.
+            return not self.is_modal and not on_sentinel
+        if action == "next_pane":
+            # Hidden during modal (so the tab-Sessions label doesn't mislead
+            # while we cycle between scope/feature inputs) and when on the
+            # sentinel (app.action_focus_next already no-ops there).
+            return not self.is_modal and not on_sentinel
+        if action == "cancel":
+            return self.is_modal
+        if action == "enter_select":
+            # Show "Select" in the selecting state (not modal).
+            return not self.is_modal
+        if action == "enter_accept":
+            # Show "Accept" during creating or confirming.
+            return self.is_modal
+        return True
+
+    def _highlight_is_sentinel(self) -> bool:
+        """True if the currently highlighted list item is the "+ New" sentinel."""
+        try:
+            lv = self.query_one("#worktree-list", ListView)
+        except Exception:
+            return False
+        child = lv.highlighted_child
+        return child is not None and child.name == NEW_WORKTREE_SENTINEL
 
     def _get_sentinel(self) -> ListItem | None:
         lv = self.query_one("#worktree-list", ListView)
@@ -119,7 +161,6 @@ class WorktreePanel(Widget, can_focus=False):
         lv = self.query_one("#worktree-list", ListView)
         lv.remove_children()
 
-        # Sort: root first, then alphabetical
         discovered.sort(key=lambda w: (not w.is_root, w.path.name))
 
         items: list[ListItem] = []
@@ -137,9 +178,8 @@ class WorktreePanel(Widget, can_focus=False):
             item._wt_is_root = wt.is_root
             items.append(item)
 
-        # Add "+ New worktree" action item at the end
         new_item = ListItem(
-            Label("[#DA7756]+ New worktree[/]"),
+            Label(f"[{ACCENT}]+ New worktree[/]"),
             name=NEW_WORKTREE_SENTINEL,
         )
         new_item._wt_path = Path()
@@ -151,11 +191,14 @@ class WorktreePanel(Widget, can_focus=False):
         lv.index = 0
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
-        """Prevent selecting the sentinel by wrapping around."""
+        """Cancel any modal state and notify the app about the new highlight."""
         if self._is_creating:
             self._hide_inline_inputs()
         if self._is_confirming:
             self._cancel_confirm()
+        # Footer visibility depends on whether we're on the sentinel, so
+        # refresh when the highlight moves.
+        self.refresh_bindings()
         if event.item is None:
             return
         if event.item.name == NEW_WORKTREE_SENTINEL:
@@ -170,8 +213,6 @@ class WorktreePanel(Widget, can_focus=False):
             )
         )
 
-    # --- Inline confirm ---
-
     @property
     def _is_confirming(self) -> bool:
         return self._confirm_item is not None
@@ -181,7 +222,6 @@ class WorktreePanel(Widget, can_focus=False):
         label = item.query_one(Label)
         self._confirm_original = str(label.render())
         self._confirm_yes = False
-        # Replace Label with Horizontal layout for right-aligned confirm
         label.remove()
         name = item.name or ""
         item.mount(
@@ -191,15 +231,18 @@ class WorktreePanel(Widget, can_focus=False):
             )
         )
         self._render_confirm()
+        self.refresh_bindings()
 
     def _render_confirm(self) -> None:
         if not self._confirm_item:
             return
         choices = self._confirm_item.query_one(".confirm-choices", Label)
+        # Layout: No (left) │ Yes (right). Directional arrows: left → No,
+        # right → Yes. Noop when already on that side.
         if self._confirm_yes:
-            choices.update("[#ff6b7c]Yes[/] │ No")
+            choices.update(f"No │ [{DANGER}]Yes[/]")
         else:
-            choices.update("Yes │ [#ff6b7c]No[/]")
+            choices.update(f"[{DANGER}]No[/] │ Yes")
 
     def _cancel_confirm(self) -> None:
         if self._confirm_item:
@@ -210,6 +253,7 @@ class WorktreePanel(Widget, can_focus=False):
         self._confirm_original = ""
         self._confirm_yes = False
         self._confirm_force = False
+        self.refresh_bindings()
 
     def show_force_confirm(self, wt_name: str, reason: str = "Branch not merged.") -> None:
         """Show a force-delete confirmation with a given reason."""
@@ -225,7 +269,7 @@ class WorktreePanel(Widget, can_focus=False):
                 child.mount(
                     Horizontal(
                         Label(
-                            f"[bold #ff6b7c]{reason}[/] Force delete?",
+                            f"[bold {DANGER}]{reason}[/] Force delete?",
                             classes="confirm-label",
                         ),
                         Label("", classes="confirm-choices"),
@@ -257,11 +301,10 @@ class WorktreePanel(Widget, can_focus=False):
         if event.item.name == NEW_WORKTREE_SENTINEL:
             self._show_inline_inputs()
             return
-        # Focus session panel on enter
-        try:
-            self.app.query_one("#session-list").focus()
-        except Exception:
-            pass
+        # Delegate to the app's tab-cycle logic so Enter lands on whichever
+        # session pane is actually available (Claude if installed, else
+        # Codex), and respects the user's last-chosen side.
+        self.app.action_focus_next()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "wt-scope":
@@ -270,14 +313,11 @@ class WorktreePanel(Widget, can_focus=False):
         if event.input.id == "wt-feature":
             scope = self.query_one("#wt-scope", Input).value.strip()
             feature = event.input.value.strip()
-            if not scope or not feature:
-                self.notify("Both scope and feature ID are required", severity="warning")
-                return
-            if not re.match(r"^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$", scope):
-                self.notify("Invalid scope (alphanumeric + hyphens)", severity="error")
-                return
-            if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9-]*$", feature):
-                self.notify("Invalid feature ID", severity="error")
+            try:
+                worktree.validate_scope(scope)
+                worktree.validate_feature_id(feature)
+            except ValueError as e:
+                self.notify(str(e), severity="error")
                 return
             self._hide_inline_inputs()
             self.query_one("#worktree-list", ListView).focus()
@@ -285,9 +325,18 @@ class WorktreePanel(Widget, can_focus=False):
 
     def on_key(self, event) -> None:
         if self._is_confirming:
-            if event.key == "left" or event.key == "right":
-                self._confirm_yes = not self._confirm_yes
-                self._render_confirm()
+            # Directional arrows: left → No (False), right → Yes (True).
+            # Noop when already on that side.
+            if event.key == "left":
+                if self._confirm_yes:
+                    self._confirm_yes = False
+                    self._render_confirm()
+                event.stop()
+                return
+            if event.key == "right":
+                if not self._confirm_yes:
+                    self._confirm_yes = True
+                    self._render_confirm()
                 event.stop()
                 return
             if event.key == "enter":
@@ -306,6 +355,16 @@ class WorktreePanel(Widget, can_focus=False):
                 return
             scope = self.query_one("#wt-scope", Input)
             feature = self.query_one("#wt-feature", Input)
+            if event.key == "tab":
+                # Tab cycles between the two fields while creating. The
+                # panel's priority `next_pane` binding is disabled during
+                # modal via check_action, so the key arrives here.
+                if scope.has_focus:
+                    feature.focus()
+                else:
+                    scope.focus()
+                event.stop()
+                return
             if event.key == "right" and scope.has_focus and scope.cursor_position >= len(scope.value):
                 feature.focus()
                 event.stop()
@@ -314,6 +373,35 @@ class WorktreePanel(Widget, can_focus=False):
                 scope.focus()
                 event.stop()
                 return
+
+    def action_next_pane(self) -> None:
+        """Tab action: forward to app focus_next. Disabled during modal."""
+        self.app.action_focus_next()
+
+    def action_enter_select(self) -> None:
+        """Enter action: activate the highlighted list item. Delegates to the
+        ListView's built-in select-cursor action, which posts ListView.Selected
+        and triggers on_list_view_selected."""
+        self.query_one("#worktree-list", ListView).action_select_cursor()
+
+    async def action_enter_accept(self) -> None:
+        """Enter action during modal: accept confirm or submit focused input."""
+        if self._is_confirming:
+            self._accept_confirm()
+            return
+        inp = self.app.focused
+        if isinstance(inp, Input):
+            await inp.action_submit()
+
+    def action_cancel(self) -> None:
+        """Escape action: cancel modal (create/confirm)."""
+        if self._is_confirming:
+            self._cancel_confirm()
+            return
+        if self._is_creating:
+            self._hide_inline_inputs()
+            self.query_one("#worktree-list", ListView).focus()
+            return
 
     def action_delete_worktree(self) -> None:
         if self._is_confirming:

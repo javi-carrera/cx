@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cx"
-version = "0.2.0"
-description = "Claude Code worktree and session manager"
+version = "0.3.0"
+description = "Dual-pane session manager for Claude Code and Codex CLI across git worktrees"
 requires-python = ">=3.12"
 dependencies = [
     "textual>=1.0",
@@ -13,8 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-cx = "cx.launch:main"
-cxx = "cx.app:main"
+cx = "cx.app:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["cx"]

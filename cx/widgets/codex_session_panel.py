@@ -1,4 +1,4 @@
-"""Claude Code session panel for the TUI."""
+"""Codex session panel for the TUI."""
 
 import re
 from pathlib import Path
@@ -11,17 +11,17 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Input, Label, ListItem, ListView, Static
 
-from cx import claude, state
+from cx import codex, state
 from cx.colors import ACCENT, BORDER, DANGER, GREEN
 
-NEW_SESSION_SENTINEL = "__new_session__"
+NEW_SESSION_SENTINEL = "__new_codex_session__"
 SESSION_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9 _-]*$")
 
 
-class SessionPanel(Widget, can_focus=False):
-    """Panel showing Claude Code sessions for the selected worktree."""
+class CodexSessionPanel(Widget, can_focus=False):
+    """Panel showing Codex CLI sessions for the selected worktree."""
 
-    BORDER_TITLE = "Claude Code Sessions"
+    BORDER_TITLE = "Codex Sessions"
 
     BINDINGS = [
         Binding("q", "app.quit", "Quit", show=True),
@@ -30,8 +30,8 @@ class SessionPanel(Widget, can_focus=False):
         Binding("s", "app.toggle_settings", "Settings", show=True),
         Binding("tab", "app.focus_next", "Worktrees", show=True, priority=True),
         # Routed through a panel-local action so delete-confirm / rename can
-        # intercept before focus changes to the Codex column.
-        Binding("right", "right_arrow", "Codex", show=True, priority=True),
+        # intercept before focus changes to the Claude column.
+        Binding("left", "left_arrow", "Claude Code", show=True, priority=True),
         Binding("escape", "cancel", "Cancel", show=True),
         # Enter bindings: gated by check_action so only one shows at a time.
         Binding("enter", "enter_select", "Select", show=True),
@@ -39,7 +39,7 @@ class SessionPanel(Widget, can_focus=False):
     ]
 
     class NewSessionRequested(Message):
-        """Request to create a new session."""
+        """Request to create a new Codex session."""
 
         def __init__(self, wt_name: str, wt_path: Path, name: str) -> None:
             super().__init__()
@@ -48,30 +48,30 @@ class SessionPanel(Widget, can_focus=False):
             self.name = name
 
     class DeleteSessionConfirmed(Message):
-        """Confirmed deletion of a session."""
+        """Confirmed deletion of a Codex session."""
 
-        def __init__(self, wt_name: str, session_id: str, session_name: str) -> None:
+        def __init__(self, wt_name: str, thread_id: str, session_name: str) -> None:
             super().__init__()
             self.wt_name = wt_name
-            self.session_id = session_id
+            self.thread_id = thread_id
             self.session_name = session_name
 
     class LaunchSessionRequested(Message):
-        """Request to launch/resume a Claude Code session."""
+        """Request to launch/resume a Codex session."""
 
-        def __init__(self, session_id: str, session_name: str, wt_path: Path) -> None:
+        def __init__(self, thread_id: str, session_name: str, wt_path: Path) -> None:
             super().__init__()
-            self.session_id = session_id
+            self.thread_id = thread_id
             self.session_name = session_name
             self.wt_path = wt_path
 
     class RenameSessionRequested(Message):
-        """Request to rename a session."""
+        """Request to rename a Codex session."""
 
-        def __init__(self, wt_name: str, session_id: str, old_name: str, new_name: str) -> None:
+        def __init__(self, wt_name: str, thread_id: str, old_name: str, new_name: str) -> None:
             super().__init__()
             self.wt_name = wt_name
-            self.session_id = session_id
+            self.thread_id = thread_id
             self.old_name = old_name
             self.new_name = new_name
 
@@ -85,24 +85,24 @@ class SessionPanel(Widget, can_focus=False):
 
     def compose(self) -> ComposeResult:
         empty_text = (
-            "Claude Code not installed" if not claude.IS_INSTALLED
+            "Codex not installed" if not codex.IS_INSTALLED
             else "Select a worktree"
         )
-        yield Static(empty_text, classes="empty-message", id="session-empty")
-        yield ListView(id="session-list")
-        yield Input(placeholder="session name", id="session-name", classes="inline-input")
+        yield Static(empty_text, classes="empty-message", id="codex-session-empty")
+        yield ListView(id="codex-session-list")
+        yield Input(placeholder="session name", id="codex-session-name", classes="inline-input")
 
     def on_mount(self) -> None:
-        self.query_one("#session-list", ListView).display = False
-        self.query_one("#session-name", Input).display = False
-        if not claude.IS_INSTALLED:
+        self.query_one("#codex-session-list", ListView).display = False
+        self.query_one("#codex-session-name", Input).display = False
+        if not codex.IS_INSTALLED:
             # Panel is inert: the empty "not installed" message is permanent,
             # the ListView never shows, and focus can never land here.
-            self.query_one("#session-list", ListView).can_focus = False
+            self.query_one("#codex-session-list", ListView).can_focus = False
 
     def on_descendant_focus(self, event) -> None:
         """Re-apply index when session list gains focus."""
-        lv = self.query_one("#session-list", ListView)
+        lv = self.query_one("#codex-session-list", ListView)
         if lv.has_focus and lv.index is not None:
             idx = lv.index
             lv.index = None
@@ -110,17 +110,17 @@ class SessionPanel(Widget, can_focus=False):
 
     def content_height(self) -> int:
         """Return total visible item count for height calculation."""
-        lv = self.query_one("#session-list", ListView)
+        lv = self.query_one("#codex-session-list", ListView)
         if not lv.display:
             return 1
         count = sum(1 for c in lv.children if c.display)
-        if self.query_one("#session-name", Input).display:
+        if self.query_one("#codex-session-name", Input).display:
             count += 1
         return count
 
     @property
     def _is_creating(self) -> bool:
-        return self.query_one("#session-name", Input).display
+        return self.query_one("#codex-session-name", Input).display
 
     @property
     def _is_renaming(self) -> bool:
@@ -133,15 +133,15 @@ class SessionPanel(Widget, can_focus=False):
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Gate footer visibility based on modal state and highlight."""
-        from cx import codex
+        from cx import claude
         on_sentinel = self._highlight_is_sentinel()
         if action in ("delete_session", "rename_session"):
             # Hidden during modal or when hovering "+ New session".
             return not self.is_modal and not on_sentinel
-        if action == "right_arrow":
-            # Hide when the Codex column is not installed — there's nothing
+        if action == "left_arrow":
+            # Hide when the Claude column is not installed — there's nothing
             # to cross to.
-            if not codex.IS_INSTALLED:
+            if not claude.IS_INSTALLED:
                 return False
             return not self.is_modal
         if action == "cancel":
@@ -156,14 +156,14 @@ class SessionPanel(Widget, can_focus=False):
     def _highlight_is_sentinel(self) -> bool:
         """True if the currently highlighted list item is the "+ New" sentinel."""
         try:
-            lv = self.query_one("#session-list", ListView)
+            lv = self.query_one("#codex-session-list", ListView)
         except Exception:
             return False
         child = lv.highlighted_child
         return child is not None and child.name == NEW_SESSION_SENTINEL
 
     def _get_sentinel(self) -> ListItem | None:
-        lv = self.query_one("#session-list", ListView)
+        lv = self.query_one("#codex-session-list", ListView)
         for child in lv.children:
             if getattr(child, "name", None) == NEW_SESSION_SENTINEL:
                 return child
@@ -173,12 +173,12 @@ class SessionPanel(Widget, can_focus=False):
         sentinel = self._get_sentinel()
         if sentinel:
             sentinel.display = False
-        inp = self.query_one("#session-name", Input)
+        inp = self.query_one("#codex-session-name", Input)
         inp.display = True
         inp.focus()
 
     def _hide_inline_input(self) -> None:
-        inp = self.query_one("#session-name", Input)
+        inp = self.query_one("#codex-session-name", Input)
         inp.value = ""
         inp.display = False
         sentinel = self._get_sentinel()
@@ -187,17 +187,17 @@ class SessionPanel(Widget, can_focus=False):
 
     def clear_sessions(self) -> None:
         """Reset session panel to empty state."""
-        if not claude.IS_INSTALLED:
+        if not codex.IS_INSTALLED:
             return  # Inert — keep the "not installed" message.
         self._current_wt_name = None
         self._current_wt_path = None
         self._hide_inline_input()
         if self._is_renaming:
             self._cancel_rename()
-        lv = self.query_one("#session-list", ListView)
+        lv = self.query_one("#codex-session-list", ListView)
         lv.remove_children()
         lv.display = False
-        self.query_one("#session-empty", Static).display = True
+        self.query_one("#codex-session-empty", Static).display = True
 
     def _show_rename_input(self, item: ListItem) -> None:
         """Replace the session name label with an inline Input for renaming."""
@@ -210,7 +210,7 @@ class SessionPanel(Widget, can_focus=False):
         name_label.display = False
         rename_input = Input(
             value=current_name,
-            id="session-rename",
+            id="codex-session-rename",
             classes="inline-input",
             select_on_focus=False,
         )
@@ -227,7 +227,7 @@ class SessionPanel(Widget, can_focus=False):
             self._rename_item.styles.background = None
             h = self._rename_item.query_one(Horizontal)
             try:
-                h.query_one("#session-rename", Input).remove()
+                h.query_one("#codex-session-rename", Input).remove()
             except NoMatches:
                 pass
             h.query_one(".session-name", Label).display = True
@@ -235,19 +235,19 @@ class SessionPanel(Widget, can_focus=False):
 
     def update_sessions(self, wt_name: str, wt_path: Path) -> None:
         """Refresh the session list for the given worktree."""
-        if not claude.IS_INSTALLED:
+        if not codex.IS_INSTALLED:
             return  # Inert — keep the "not installed" message.
         self._current_wt_name = wt_name
         self._current_wt_path = wt_path
-        self.query_one("#session-name", Input).value = ""
-        self.query_one("#session-name", Input).display = False
+        self.query_one("#codex-session-name", Input).value = ""
+        self.query_one("#codex-session-name", Input).display = False
 
         current_state = state.load_state()
         wt_entry = current_state.worktrees.get(wt_name)
-        sessions = wt_entry.sessions if wt_entry else []
+        sessions = wt_entry.codex_sessions if wt_entry else []
 
-        lv = self.query_one("#session-list", ListView)
-        empty = self.query_one("#session-empty", Static)
+        lv = self.query_one("#codex-session-list", ListView)
+        empty = self.query_one("#codex-session-empty", Static)
 
         lv.remove_children()
         empty.display = False
@@ -255,10 +255,14 @@ class SessionPanel(Widget, can_focus=False):
 
         items: list[ListItem] = []
 
-        active_ids = claude.get_active_session_ids()
+        # Sort by last_accessed descending. "Active" is driven by the
+        # cx-owned owner_pid on each session entry, validated against /proc,
+        # so a crashed codex can't leave a permanent false dot.
         sorted_sessions = sorted(sessions, key=lambda s: s.last_accessed, reverse=True)
         for session in sorted_sessions:
-            is_active = session.session_id in active_ids
+            is_active = bool(
+                session.owner_pid and codex.prune_dead_pids({session.owner_pid})
+            )
             dot_color = GREEN if is_active else BORDER
             item = ListItem(
                 Horizontal(
@@ -267,7 +271,7 @@ class SessionPanel(Widget, can_focus=False):
                 ),
                 name=session.name,
             )
-            item._session_id = session.session_id
+            item._codex_thread_id = session.thread_id
             item._is_active = is_active
             items.append(item)
 
@@ -275,7 +279,7 @@ class SessionPanel(Widget, can_focus=False):
             Label(f"[{ACCENT}]+ New session[/]"),
             name=NEW_SESSION_SENTINEL,
         )
-        new_item._session_id = None
+        new_item._codex_thread_id = None
         items.append(new_item)
 
         lv.mount_all(items)
@@ -334,7 +338,7 @@ class SessionPanel(Widget, can_focus=False):
             self.post_message(
                 self.DeleteSessionConfirmed(
                     wt_name=self._current_wt_name or "",
-                    session_id=getattr(item, "_session_id", ""),
+                    thread_id=getattr(item, "_codex_thread_id", ""),
                     session_name=item.name or "",
                 )
             )
@@ -361,14 +365,14 @@ class SessionPanel(Widget, can_focus=False):
                 return
             self._show_inline_input()
             return
-        session_id = getattr(event.item, "_session_id", None)
+        thread_id = getattr(event.item, "_codex_thread_id", None)
         if getattr(event.item, "_is_active", False):
             self.notify("Session is already active", severity="warning")
             return
-        if session_id and self._current_wt_path:
+        if thread_id and self._current_wt_path:
             self.post_message(
                 self.LaunchSessionRequested(
-                    session_id=session_id,
+                    thread_id=thread_id,
                     session_name=event.item.name or "",
                     wt_path=self._current_wt_path,
                 )
@@ -386,7 +390,7 @@ class SessionPanel(Widget, can_focus=False):
         return name
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "session-name":
+        if event.input.id == "codex-session-name":
             name = self._validate_session_name(event.input.value)
             if not name:
                 return
@@ -398,7 +402,7 @@ class SessionPanel(Widget, can_focus=False):
                     name=name,
                 )
             )
-        elif event.input.id == "session-rename":
+        elif event.input.id == "codex-session-rename":
             name = self._validate_session_name(event.input.value)
             if not name:
                 return
@@ -409,25 +413,25 @@ class SessionPanel(Widget, can_focus=False):
                 self.post_message(
                     self.RenameSessionRequested(
                         wt_name=self._current_wt_name or "",
-                        session_id=getattr(item, "_session_id", ""),
+                        thread_id=getattr(item, "_codex_thread_id", ""),
                         old_name=old_name,
                         new_name=name,
                     )
                 )
             else:
                 # Keep focus on this pane when the rename handler is skipped.
-                self.query_one("#session-list", ListView).focus()
+                self.query_one("#codex-session-list", ListView).focus()
 
-    def action_right_arrow(self) -> None:
-        """Right arrow: directional in confirm (→ Yes), else move focus to Codex."""
+    def action_left_arrow(self) -> None:
+        """Left arrow: directional in confirm (→ No), else move focus to Claude."""
         if self._is_confirming:
-            if not self._confirm_yes:
-                self._confirm_yes = True
+            if self._confirm_yes:
+                self._confirm_yes = False
                 self._render_confirm()
             return
         if self._is_renaming:
             return
-        self.app.action_focus_right()
+        self.app.action_focus_left()
 
     def action_cancel(self) -> None:
         """Escape action: cancel create/rename/confirm modal state."""
@@ -436,18 +440,18 @@ class SessionPanel(Widget, can_focus=False):
             return
         if self._is_renaming:
             self._cancel_rename()
-            self.query_one("#session-list", ListView).focus()
+            self.query_one("#codex-session-list", ListView).focus()
             return
         if self._is_creating:
             self._hide_inline_input()
-            self.query_one("#session-list", ListView).focus()
+            self.query_one("#codex-session-list", ListView).focus()
             return
 
     def action_enter_select(self) -> None:
         """Enter action: activate the highlighted list item. Delegates to the
         ListView's built-in select-cursor action, which posts ListView.Selected
         and triggers on_list_view_selected."""
-        self.query_one("#session-list", ListView).action_select_cursor()
+        self.query_one("#codex-session-list", ListView).action_select_cursor()
 
     async def action_enter_accept(self) -> None:
         """Enter action during modal: accept confirm or submit focused input."""
@@ -462,12 +466,12 @@ class SessionPanel(Widget, can_focus=False):
         if self._is_renaming:
             if event.key == "escape":
                 self._cancel_rename()
-                self.query_one("#session-list", ListView).focus()
+                self.query_one("#codex-session-list", ListView).focus()
                 event.stop()
                 return
         if self._is_confirming:
             # Directional arrows: left → No, right → Yes. Both arrows are
-            # handled here during confirm — the panel's priority `right_arrow`
+            # handled here during confirm — the panel's priority `left_arrow`
             # binding is disabled via check_action so it doesn't pre-empt us.
             if event.key == "left":
                 if self._confirm_yes:
@@ -491,7 +495,7 @@ class SessionPanel(Widget, can_focus=False):
                 return
         if event.key == "escape" and self._is_creating:
             self._hide_inline_input()
-            self.query_one("#session-list", ListView).focus()
+            self.query_one("#codex-session-list", ListView).focus()
             event.stop()
 
     def action_delete_session(self) -> None:
@@ -503,7 +507,7 @@ class SessionPanel(Widget, can_focus=False):
             return
         if not self._current_wt_name:
             return
-        lv = self.query_one("#session-list", ListView)
+        lv = self.query_one("#codex-session-list", ListView)
         if lv.highlighted_child is None:
             return
         if lv.highlighted_child.name == NEW_SESSION_SENTINEL:
@@ -521,7 +525,7 @@ class SessionPanel(Widget, can_focus=False):
             return
         if not self._current_wt_name:
             return
-        lv = self.query_one("#session-list", ListView)
+        lv = self.query_one("#codex-session-list", ListView)
         if lv.highlighted_child is None:
             return
         if lv.highlighted_child.name == NEW_SESSION_SENTINEL:

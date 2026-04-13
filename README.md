@@ -1,125 +1,121 @@
 # cx
 
-A terminal UI for managing Claude Code sessions across git worktrees.
+A terminal UI for managing Claude Code and Codex CLI sessions across git worktrees.
 
-If you work with multiple git worktrees and run Claude Code sessions in each, cx gives you a single place to create, browse, launch, and manage them all.
+If you juggle multiple git worktrees and run Claude Code and/or Codex in several of them, `cx` gives you a single keyboard-driven place to create, browse, launch, and manage them all.
 
-## What it does
+## Installation
 
-`cxx` opens a Textual TUI with two panels:
+`cx` is designed to be installed **globally** with [uv](https://docs.astral.sh/uv/) and run from inside any git repository.
 
-- **Worktrees** (left) — lists all git worktrees discovered via `git worktree list`. Shows the root worktree and any feature worktrees. Create new worktrees with scope/feature naming (`scope--feature-id`). When a matching branch exists on the remote, it's automatically checked out with a tracking branch.
-
-- **Sessions** (right) — shows Claude Code sessions for the selected worktree. Active sessions display a green indicator. Launch a session and cx suspends, handing you a clean terminal with Claude Code running. Exit Claude Code and you're back in the TUI. Previously launched sessions are automatically resumed.
-
-A **Settings** panel (`s` to toggle) lets you configure Claude Code launch options per session:
-
-| Setting         | Options                                                              |
-|-----------------|----------------------------------------------------------------------|
-| Permission mode | `bypassPermissions`, `auto`, `acceptEdits`, `plan`, `default`, `dontAsk` |
-| Model           | `opus`, `sonnet`, `haiku`                                            |
-| Effort          | `high`, `low`, `medium`, `max`                                       |
-| Verbose         | `OFF`, `ON`                                                          |
-| Debug           | `OFF`, `ON`                                                          |
-
-A **Status bar** at the bottom shows git info for the selected worktree: branch name, ahead/behind counts, staged/unstaged/untracked file counts, and last commit message.
-
-`cx` is a quick launcher — clears the terminal and drops you straight into `claude --dangerously-skip-permissions` in the current directory.
-
-## Usage
-
-### `cxx` — Session Manager TUI
-
-```
-cxx
+```bash
+uv tool install git+https://github.com/javi-carrera/cx.git
 ```
 
-**Navigation:**
+From a local checkout:
 
-| Key               | Action                                           |
-|--------------------|--------------------------------------------------|
-| `Tab` / `Shift+Tab` | Switch between panels                          |
-| `Left` / `Right`  | Switch between panels                             |
-| `Up` / `Down`     | Navigate list items                               |
-| `Enter`           | Select item / launch session / switch to sessions |
-| `d`               | Delete highlighted worktree or session             |
-| `s`               | Toggle settings panel                             |
-| `Escape`          | Cancel current action                             |
-| `q`               | Quit                                              |
-
-**Creating a worktree:**
-
-1. Navigate to `+ New worktree` and press `Enter`
-2. Type the scope, press `Right` or `Enter` to move to feature ID
-3. Press `Enter` to create
-
-**Creating a session:**
-
-1. Navigate to `+ New session` and press `Enter`
-2. Type a session name, press `Enter`
-3. Select the session and press `Enter` to launch Claude Code
-
-**Deleting:** Press `d` on any worktree or session. An inline confirm appears — use `Left`/`Right` to select Yes/No, `Enter` to confirm.
-
-**Safe deletion:** Worktrees with uncommitted changes or unmerged branches are blocked from deletion. A force-delete confirmation appears explaining the reason, requiring explicit opt-in.
-
-**Settings:** Press `s` to toggle the settings panel. Use `Left`/`Right` to cycle through values for each setting. Settings apply to the next session launch.
-
-### `cx` — Quick Launcher
-
-```
-cx
+```bash
+uv tool install /path/to/cx
 ```
 
-Clears the terminal and launches Claude Code with `--dangerously-skip-permissions` in the current directory.
-
-## Status Line
-
-A standalone script that adds a status line to Claude Code with Unicode progress bars.
-
-**What it shows:**
-
-- Current directory and session name
-- Context window usage with progress bar and token counts
-- 5-hour rate limit usage with countdown to reset
-
-**Install:**
-
-1. Copy `status-line/status_line.py` anywhere on your machine
-2. Add to your `.claude/settings.json`:
-
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "python3 /path/to/status_line.py"
-  }
-}
-```
-
-No dependencies — just Python 3 standard library.
-
-## How it works
-
-- Worktrees are discovered from git (`git worktree list --porcelain`) and stored as `scope--feature-id` directories
-- Sessions are tracked in a JSON state file (`.cx-state.json`) inside the worktree directory
-- Active session detection works by scanning running processes for `claude --session-id` flags
-- When you launch a session, the TUI suspends and Claude Code runs in the foreground. Exiting Claude returns you to the TUI
-- Session resume is automatic — first launch uses `--session-id`, subsequent launches use `--resume`
-
-## Configuration
-
-`cx/config.py` contains:
-
-- `CLAUDE_FLAGS` — flags passed to Claude Code (default: `["--dangerously-skip-permissions"]`)
-- Worktree directory location — defaults to `<repo-root>/.claude/worktrees/`
+Reinstall after local edits with `uv tool install --force --reinstall /path/to/cx`. Upgrade with `uv tool upgrade cx`. Remove with `uv tool uninstall cx`.
 
 ## Requirements
 
 - Python 3.12+
 - Git with worktree support
-- Claude Code CLI (`claude`) on PATH
+- A terminal supported by [Textual](https://textual.textualize.io/)
+- At least one of:
+  - [Claude Code CLI](https://github.com/anthropics/claude-code) (`claude` on `PATH`)
+  - [OpenAI Codex CLI](https://github.com/openai/codex) (`codex` on `PATH`)
+
+cx is developed and tested on Linux.
+
+## Usage
+
+Run `cx` from any directory inside a git repository:
+
+```bash
+cx
+```
+
+cx opens a keyboard-driven TUI with a **Worktrees** panel on top, **Claude Code Sessions** on the bottom left, **Codex Sessions** on the bottom right, a git-aware **status bar**, and toggleable **settings** panels for each column. If only one CLI is installed, the other column becomes inert.
+
+### Keybindings
+
+| Key | Action |
+| --- | --- |
+| `Tab` / `Shift+Tab` | Cycle between Worktrees and Sessions |
+| `Left` / `Right` | Switch Claude/Codex columns, or cycle setting values when settings are focused |
+| `Up` / `Down` | Navigate items |
+| `Enter` | Select / launch |
+| `d` | Delete highlighted worktree or session |
+| `r` | Rename highlighted session |
+| `s` | Toggle the settings panel for the focused column |
+| `Escape` | Cancel the current action |
+| `q` | Quit |
+
+### Worktrees
+
+Highlight `+ New worktree`, enter a scope (`Right` or `Tab` to move to the feature ID), and press `Enter`. cx names the worktree `scope--feature-id` and the branch `scope/feature-id`. If a matching local branch exists, it is checked out; if a local `origin/<branch>` ref exists (from a prior fetch), cx branches from it; otherwise cx creates a new branch. cx never fetches from the remote — run `git fetch` first if you want upstream branches considered.
+
+Press `d` to delete a worktree. Worktrees with uncommitted changes, unmerged branches, or an in-progress merge / rebase / cherry-pick are blocked from deletion — a force-delete prompt appears explaining why. A force-delete notification includes the pre-delete branch SHA so you can recover via `git branch <name> <sha>` or `git reflog`. Root worktrees cannot be deleted.
+
+### Sessions
+
+Highlight `+ New session` in either column, enter a name (letters, digits, spaces, underscores, and hyphens; must start with a letter or digit), and press `Enter`. Highlight the session and press `Enter` again to launch — cx suspends and hands you a clean terminal with Claude Code or Codex running. Exit the CLI (`Ctrl+D`, `exit`, etc.) to return to cx. Subsequent launches resume the same conversation.
+
+Sessions are listed most-recently-used first. Active sessions show a green indicator and cannot be relaunched, renamed, or deleted while running. If a launch fails (for example because the CLI binary is missing), cx surfaces a notification and returns cleanly to the TUI.
+
+### Settings
+
+Press `s` from a session column to open its settings panel. Use `Left` / `Right` to cycle the highlighted value. Settings apply to the next launch.
+
+**Claude Code**
+
+| Setting | Values |
+| --- | --- |
+| Permission mode | `plan`, `dontAsk`, `default`, `acceptEdits`, `auto`, `bypassPermissions` |
+| Model | `haiku`, `sonnet`, `opus` |
+| Context | `200k`, `1M` |
+| Effort | `low`, `medium`, `high`, `max` |
+| Verbose | `OFF`, `ON` |
+| Debug | `OFF`, `ON` |
+
+**Codex**
+
+| Setting | Values |
+| --- | --- |
+| Approval | `untrusted`, `on-request`, `never`, `full-auto`, `bypass` |
+| Sandbox | `read-only`, `workspace-write`, `danger-full-access` |
+| Model | `gpt-5.2`, `gpt-5.3-codex`, `gpt-5.4-mini`, `gpt-5.4` |
+| Reasoning | `minimal`, `low`, `medium`, `high`, `xhigh` |
+| Search | `OFF`, `ON` |
+
+Codex `Approval = bypass` disables the sandbox entirely; `full-auto` implies `workspace-write`; the Sandbox setting only applies for the other approval modes. `Search = ON` combined with `Reasoning = minimal` is rejected by the Codex API, so cx drops `--search` for that launch and shows a warning.
+
+### Status bar
+
+The bar at the top shows the selected worktree's branch, ahead/behind counts, staged/unstaged/untracked file counts, and last commit message.
+
+## Claude Code status line
+
+This repository also ships `status-line/status_line.py` — a standalone script that adds a rich status line to Claude Code with Unicode progress bars. It shows the current directory and session name, the context window usage (with progress bar and token counts), and the 5-hour rate-limit usage with countdown to reset. No dependencies beyond the Python 3 standard library.
+
+To install it:
+
+1. Copy `status-line/status_line.py` somewhere on your machine.
+2. Add the following to your Claude Code `~/.claude/settings.json`:
+
+   ```json
+   {
+     "statusLine": {
+       "type": "command",
+       "command": "python3 /path/to/status_line.py"
+     }
+   }
+   ```
 
 ## License
 
-MIT
+MIT. See [`LICENSE`](LICENSE).
