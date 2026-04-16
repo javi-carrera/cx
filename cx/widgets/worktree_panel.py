@@ -9,7 +9,7 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Input, Label, ListItem, ListView
 
-from cx import worktree
+from cx import editor, worktree
 from cx.colors import ACCENT, DANGER
 
 NEW_WORKTREE_SENTINEL = "__new__"
@@ -38,6 +38,7 @@ class WorktreePanel(Widget, can_focus=False):
     BINDINGS = [
         Binding("q", "app.quit", "Quit", show=True),
         Binding("d", "delete_worktree", "Delete", show=True),
+        Binding("e", "open_editor", "Editor", show=True),
         Binding("tab", "next_pane", "Sessions", show=True, priority=True),
         Binding("escape", "cancel", "Cancel", show=True),
         # Enter bindings: two bindings with different labels, gated by
@@ -103,6 +104,8 @@ class WorktreePanel(Widget, can_focus=False):
         on_sentinel = self._highlight_is_sentinel()
         if action == "delete_worktree":
             # Hidden during modal and on the "+ New worktree" sentinel.
+            return not self.is_modal and not on_sentinel
+        if action == "open_editor":
             return not self.is_modal and not on_sentinel
         if action == "next_pane":
             # Hidden during modal (so the tab-Sessions label doesn't mislead
@@ -402,6 +405,22 @@ class WorktreePanel(Widget, can_focus=False):
             self._hide_inline_inputs()
             self.query_one("#worktree-list", ListView).focus()
             return
+
+    def action_open_editor(self) -> None:
+        lv = self.query_one("#worktree-list", ListView)
+        item = lv.highlighted_child
+        if item is None or item.name == NEW_WORKTREE_SENTINEL:
+            return
+        path: Path = getattr(item, "_wt_path", Path())
+        try:
+            binary = editor.open_in_editor(path)
+        except FileNotFoundError as e:
+            self.notify(str(e), severity="warning")
+            return
+        except OSError as e:
+            self.notify(f"Failed to open editor: {e}", severity="error")
+            return
+        self.notify(f"Opened {path.name} in {binary}")
 
     def action_delete_worktree(self) -> None:
         if self._is_confirming:
